@@ -1,17 +1,16 @@
-FROM node:18-alpine AS backend-build
+FROM node:18-alpine
+RUN apk add --no-cache apache2
 WORKDIR /app/backend
+
 COPY backend/package*.json ./
 RUN npm ci --only=production
+
 COPY backend/ ./
 
-FROM httpd:2.4-alpine AS frontend
+COPY index.html /var/www/localhost/htdocs/
 
-COPY index.html /usr/local/apache2/htdocs/
-
-COPY --from=backend-build /app/backend /usr/local/apache2/htdocs/backend
-
-WORKDIR /usr/local/apache2/htdocs/backend
+RUN echo "ServerName localhost" >> /etc/apache2/httpd.conf
 
 EXPOSE 80 3000
 
-CMD ["sh", "-c", "httpd-foreground & node server.js"]
+CMD ["sh", "-c", "httpd && node server.js"]
