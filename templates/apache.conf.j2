@@ -1,0 +1,29 @@
+<VirtualHost *:80>
+    ServerName localhost
+    DocumentRoot {{ app_dir }}
+
+    # Serve frontend files
+    <Directory "{{ app_dir }}">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+        
+        # For SPA routing
+        RewriteEngine On
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteCond %{REQUEST_FILENAME} !-d
+        RewriteRule . /index.html [L]
+    </Directory>
+
+    # Proxy API requests to Node.js backend
+    ProxyPreserveHost On
+    ProxyPass /api http://localhost:{{ node_port }}/api
+    ProxyPassReverse /api http://localhost:{{ node_port }}/api
+    
+    # Proxy for API docs
+    ProxyPass /api-docs http://localhost:{{ node_port }}/api-docs
+    ProxyPassReverse /api-docs http://localhost:{{ node_port }}/api-docs
+
+    ErrorLog ${APACHE_LOG_DIR}/myapp_error.log
+    CustomLog ${APACHE_LOG_DIR}/myapp_access.log combined
+</VirtualHost>

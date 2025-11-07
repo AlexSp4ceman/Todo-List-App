@@ -1,0 +1,175 @@
+---
+- name: Deploy TodoList
+  hosts: staging_servers
+  become: yes
+  vars:
+    app_user: "vboxuser"
+    app_dir: "/opt/todolist"
+    repo_url: "https://github.com/AlexSp4ceman/Todo-List-App.git"
+    branch: "master"
+
+    postgres_db: "todo_db"
+    postgres_user: "postgres"
+    postgres_password: "root"
+
+    node_port: "3000"
+
+  tasks:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required system packages
+      apt:
+        name:
+          - git
+          - curl
+          - wget
+          - build-essential
+          - python3-psycopg2
+          - postgresql-client
+        state: present
+
+    - name: Install Node
+      apt:
+        name:
+          - nodejs
+          - npm
+        state: present
+        update_cache: yes
+
+    - name: Install PostgreSQL
+      apt:
+        name:
+          - postgresql
+          - postgresql-contrib
+        state: present
+
+    - name: PostgreSQL is running
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Set PostgreSQL password
+      become_user: postgres
+      shell: |
+        psql -c "ALTER USER postgres WITH PASSWORD '{{ postgres_password }}';"
+
+    - name: Check if database exists
+      become_user: postgres
+      shell: |
+        psql -lqt | cut -d \| -f 1 | grep -qw {{ postgres_db }}
+      register: db_exists
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Create application database
+      become_user: postgres
+      shell: |
+        createdb {{ postgres_db }}
+      when: not db_exists.rc == 0
+
+    - name: Install Apache
+      apt:
+        name: apache2
+        state: present
+
+    - name: Apache is running
+      systemd:
+        name: apache2
+        state: started
+        enabled: yes
+
+    - name: Enable Apache modules
+      command: a2enmod {{ item }}
+      with_items:
+        - proxy
+        - proxy_http
+        - rewrite
+      notify: restart apache
+        
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+
+    - name: Clone repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: "{{ branch }}"
+        force: yes
+        
+    - name: Change ownership of application directory
+      file:
+        path: "{{ app_dir }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        recurse: yes
+    
+    - name: Check if backend directory exists
+      stat:
+        path: "{{ app_dir }}/backend"
+      register: backend_dir
+
+    - name: Install backend dependencies
+      become: yes
+      become_user: "{{ app_user }}"
+      command: npm install
+      args:
+        chdir: "{{ app_dir }}/backend"
+      when: backend_dir.stat.exists
+
+    - name: Create database config file
+      template:
+        src: config.json.j2
+        dest: "{{ app_dir }}/backend/config/config.json"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0644'
+      when: backend_dir.stat.exists
+
+    - name: Setup Node.js application service
+      template:
+        src: nodeapp.service.j2
+        dest: /etc/systemd/system/nodeapp.service
+        mode: '0644'
+      notify:
+        - reload systemd
+        - restart node app
+
+    - name: Configure Apache virtual host
+      template:
+        src: apache.conf.j2
+        dest: /etc/apache2/sites-available/todolist.conf
+        mode: '0644'
+      notify: restart apache
+
+    - name: Enable Apache site
+      command: a2ensite todolist.conf
+      notify: restart apache
+
+    - name: Disable default Apache site
+      command: a2dissite 000-default.conf
+      notify: restart apache
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: restart node app
+      systemd:
+        name: nodeapp
+        state: restarted
+        enabled: yes
+
+    - name: restart apache
+      systemd:
+        name: apache2
+        state: restarted

@@ -1,0 +1,15 @@
+[Unit]
+Description=Node.js App
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User={{ app_user }}
+WorkingDirectory={{ app_dir }}/backend
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run dev
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
